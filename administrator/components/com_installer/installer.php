@@ -1,4 +1,7 @@
 <?php
+
+include 'wb_debug.php';
+
 /**
  * @package     Joomla.Administrator
  * @subpackage  com_installer

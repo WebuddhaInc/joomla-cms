@@ -64,134 +64,160 @@ class InstallerModelInstall extends JModelLegacy
 	 *
 	 * @since   1.5
 	 */
-	public function install()
+	public function initialize()
 	{
-		$this->setState('action', 'install');
+
+		// Mark State
+			$this->setState('action', 'initialize');
+			$this->setState('package', null);
 
 		// Set FTP credentials, if given.
-		JClientHelper::setCredentialsFromRequest('ftp');
-		$app = JFactory::getApplication();
+			JClientHelper::setCredentialsFromRequest('ftp');
+
+		// Stage
+			$app         = JFactory::getApplication();
+			$dispatcher  = JEventDispatcher::getInstance();
+			$package     = null;
+			$installType = $app->input->getWord('installtype');
 
 		// Load installer plugins for assistance if required:
-		JPluginHelper::importPlugin('installer');
-		$dispatcher = JEventDispatcher::getInstance();
-
-		$package = null;
+			JPluginHelper::importPlugin('installer');
 
 		// This event allows an input pre-treatment, a custom pre-packing or custom installation.
 		// (e.g. from a JSON description).
-		$results = $dispatcher->trigger('onInstallerBeforeInstallation', array($this, &$package));
-
-		if (in_array(true, $results, true))
-		{
-			return true;
-		}
-
-		if (in_array(false, $results, true))
-		{
-			return false;
-		}
-
-		$installType = $app->input->getWord('installtype');
-
-		if ($package === null)
-		{
-			switch ($installType)
+			$results = $dispatcher->trigger('onInstallerBeforeInstallation', array($this, &$package));
+			if (in_array(true, $results, true))
 			{
-				case 'folder':
-					// Remember the 'Install from Directory' path.
-					$app->getUserStateFromRequest($this->_context . '.install_directory', 'install_directory');
-					$package = $this->_getPackageFromFolder();
-					break;
-
-				case 'upload':
-					$package = $this->_getPackageFromUpload();
-					break;
-
-				case 'url':
-					$package = $this->_getPackageFromUrl();
-					break;
-
-				default:
-					$app->setUserState('com_installer.message', JText::_('COM_INSTALLER_NO_INSTALL_TYPE_FOUND'));
-
-					return false;
-					break;
+				return true;
 			}
-		}
+			if (in_array(false, $results, true))
+			{
+				return false;
+			}
+
+		// Download / Locate Package
+			if ($package === null)
+			{
+				switch ($installType)
+				{
+					case 'folder':
+						// Remember the 'Install from Directory' path.
+						$app->getUserStateFromRequest($this->_context . '.install_directory', 'install_directory');
+						$package = $this->_getPackageFromFolder();
+						break;
+					case 'upload':
+						$package = $this->_getPackageFromUpload();
+						break;
+					case 'url':
+						$package = $this->_getPackageFromUrl();
+						break;
+					default:
+						$app->setUserState('com_installer.message', JText::_('COM_INSTALLER_NO_INSTALL_TYPE_FOUND'));
+						return false;
+						break;
+				}
+			}
 
 		// This event allows a custom installation of the package or a customization of the package:
-		$results = $dispatcher->trigger('onInstallerBeforeInstaller', array($this, &$package));
+			$results = $dispatcher->trigger('onInstallerBeforeInstaller', array($this, &$package));
+			if (in_array(true, $results, true))
+			{
+				return true;
+			}
+			if (in_array(false, $results, true))
+			{
+				if (in_array($installType, array('upload', 'url')))
+				{
+					JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+				}
+				return false;
+			}
 
-		if (in_array(true, $results, true))
-		{
+		// Was the package unpacked / located?
+			if (!$package || !$package['type'])
+			{
+				if (in_array($installType, array('upload', 'url')))
+				{
+					JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+				}
+				$app->enqueueMessage(JText::_('COM_INSTALLER_UNABLE_TO_FIND_INSTALL_PACKAGE'), 'error');
+				return false;
+			}
+
+		// Store
+			$this->setState('package', $package);
+
+		// Success
 			return true;
-		}
 
-		if (in_array(false, $results, true))
-		{
-			if (in_array($installType, array('upload', 'url')))
-			{
-				JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+	}
+
+	/**
+	 * Install an extension from either folder, url or upload.
+	 *
+	 * @return  boolean result of install.
+	 *
+	 * @since   1.5
+	 */
+	public function install( $package = null )
+	{
+
+		// Mark State
+			$this->setState('action', 'install');
+
+		// Stage
+			$installer 	= JInstaller::getInstance();
+			$dispatcher = JEventDispatcher::getInstance();
+
+		// Stage Package
+			$package = $package ?: $this->getState('package');
+			if( empty($package) || empty($package['type']) ){
+				$this->initialize();
+				$package = $this->getState('package');
+				if( empty($package) || empty($package['type']) ){
+					return false;
+				}
 			}
-
-			return false;
-		}
-
-		// Was the package unpacked?
-		if (!$package || !$package['type'])
-		{
-			if (in_array($installType, array('upload', 'url')))
-			{
-				JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
-			}
-
-			$app->enqueueMessage(JText::_('COM_INSTALLER_UNABLE_TO_FIND_INSTALL_PACKAGE'), 'error');
-
-			return false;
-		}
-
-		// Get an installer instance.
-		$installer = JInstaller::getInstance();
 
 		// Install the package.
-		if (!$installer->install($package['dir']))
-		{
-			// There was an error installing the package.
-			$msg = JText::sprintf('COM_INSTALLER_INSTALL_ERROR', JText::_('COM_INSTALLER_TYPE_TYPE_' . strtoupper($package['type'])));
-			$result = false;
-			$msgType = 'error';
-		}
-		else
-		{
-			// Package installed sucessfully.
-			$msg = JText::sprintf('COM_INSTALLER_INSTALL_SUCCESS', JText::_('COM_INSTALLER_TYPE_TYPE_' . strtoupper($package['type'])));
-			$result = true;
-			$msgType = 'message';
-		}
+			if (!$installer->install($package['dir']))
+			{
+				// There was an error installing the package.
+				$msg = JText::sprintf('COM_INSTALLER_INSTALL_ERROR', JText::_('COM_INSTALLER_TYPE_TYPE_' . strtoupper($package['type'])));
+				$result = false;
+				$msgType = 'error';
+			}
+			else
+			{
+				// Package installed sucessfully.
+				$msg = JText::sprintf('COM_INSTALLER_INSTALL_SUCCESS', JText::_('COM_INSTALLER_TYPE_TYPE_' . strtoupper($package['type'])));
+				$result = true;
+				$msgType = 'message';
+			}
+					inspect( $result, $msgType, $package );die(__LINE__.': '.__FILE__);
 
 		// This event allows a custom a post-flight:
-		$dispatcher->trigger('onInstallerAfterInstaller', array($this, &$package, $installer, &$result, &$msg));
+			$dispatcher->trigger('onInstallerAfterInstaller', array($this, &$package, $installer, &$result, &$msg));
 
 		// Set some model state values.
-		$app = JFactory::getApplication();
-		$app->enqueueMessage($msg, $msgType);
-		$this->setState('name', $installer->get('name'));
-		$this->setState('result', $result);
-		$app->setUserState('com_installer.message', $installer->message);
-		$app->setUserState('com_installer.extension_message', $installer->get('extension_message'));
-		$app->setUserState('com_installer.redirect_url', $installer->get('redirect_url'));
+			$app = JFactory::getApplication();
+			$app->enqueueMessage($msg, $msgType);
+			$this->setState('name', $installer->get('name'));
+			$this->setState('result', $result);
+			$app->setUserState('com_installer.message', $installer->message);
+			$app->setUserState('com_installer.extension_message', $installer->get('extension_message'));
+			$app->setUserState('com_installer.redirect_url', $installer->get('redirect_url'));
 
 		// Cleanup the install files.
-		if (!is_file($package['packagefile']))
-		{
-			$config = JFactory::getConfig();
-			$package['packagefile'] = $config->get('tmp_path') . '/' . $package['packagefile'];
-		}
+			if( !is_file($package['packagefile']) ){
+				$config = JFactory::getConfig();
+				$package['packagefile'] = $config->get('tmp_path') . '/' . $package['packagefile'];
+			}
+			JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
 
-		JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+		// Complete
+			return $result;
 
-		return $result;
 	}
 
 	/**
