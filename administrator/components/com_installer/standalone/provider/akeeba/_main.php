@@ -14,6 +14,7 @@
   defined('DS') or define('DS', DIRECTORY_SEPARATOR);
 
 // Unarchiver run states
+  define('KSDEBUG', 1);
   define('AK_STATE_NOFILE', 0); // File header not read yet
   define('AK_STATE_HEADER', 1); // File header read; ready to process data
   define('AK_STATE_DATA', 2); // Processing file data
@@ -40,9 +41,9 @@
   }
 
 // Make sure the locale is correct for basename() to work
-if( function_exists('setlocale')) {
-  @setlocale(LC_ALL, 'en_US.UTF8');
-}
+  if( function_exists('setlocale')) {
+    @setlocale(LC_ALL, 'en_US.UTF8');
+  }
 
 /**
  * Akeeba Restore
@@ -194,6 +195,9 @@ function masterSetup()
     die('###{"status":false,"message":"Invalid login"}###');
   }
 
+  debugMsg( $raw['task'] );
+  // debugMsg( [$_REQUEST, $raw] );
+
   // ------------------------------------------------------------
   // 3. Try the "factory" variable
   // ------------------------------------------------------------
@@ -268,8 +272,7 @@ if(!defined('KICKSTART'))
 
       if( !array_key_exists('type', get_object_vars($message)) ) return;
 
-      if( $message->type == 'startfile' )
-      {
+      if( $message->type == 'startfile' ){
         $this->filesProcessed++;
         $this->compressedTotal += $message->content->compressed;
         $this->uncompressedTotal += $message->content->uncompressed;

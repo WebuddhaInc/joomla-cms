@@ -126,7 +126,6 @@ doEncryptedAjax = function(data, successCallback, errorCallback)
 				catch(err)
 				{
 					message = AesCtr.decrypt(message, com_installer_password, 128);
-					console.log(message);
 				}
 			}
 
@@ -135,7 +134,6 @@ doEncryptedAjax = function(data, successCallback, errorCallback)
 				if (empty(data))
 				{
 					data = JSON.parse(message);
-					console.log(data);
 				}
 			}
 			catch(err)
@@ -203,7 +201,6 @@ pingExtract = function()
 
 startExtract = function()
 {
-	console.log("started");
 	// Reset variables
 	this.stat_files = 0;
 	this.stat_inbytes = 0;
@@ -253,12 +250,11 @@ stepExtract = function(data)
 	{
 		// Add data to variables
 		stat_inbytes += data.bytesIn;
-		stat_percent = (stat_inbytes * 100) / com_installer_totalsize;
-
-		// Update GUI
-		stat_inbytes += data.bytesIn;
 		stat_outbytes += data.bytesOut;
 		stat_files += data.files;
+		stat_percent = (stat_inbytes * 100) / com_installer_totalsize;
+
+		console.log( data.bytesIn, stat_inbytes, data.bytesOut, stat_outbytes, data.files, stat_files );
 
 		if (stat_percent < 100)
 		{
@@ -277,7 +273,7 @@ stepExtract = function(data)
 		jQuery('#extpercent').text(stat_percent.toFixed(1));
 		jQuery('#extbytesin').text(stat_inbytes);
 		jQuery('#extbytesout').text(stat_outbytes);
-		jQuery('#extfiles').text(data.lastfile);
+		jQuery('#extfiles').text(stat_files);
 
 		// Do AJAX post
 		post = {
@@ -295,6 +291,8 @@ finalizeUpdate = function ()
 	// Do AJAX post
 	var post = { task : 'finalizeRestore', factory: window.factory };
 	doEncryptedAjax(post, function(data){
+		alert('Done');
+		return;
 		window.location = com_installer_return_url;
 	});
 };

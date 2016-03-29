@@ -40,6 +40,7 @@ class AKFactory {
       {
         $myInstance = new self();
       }
+
     return $myInstance;
   }
 

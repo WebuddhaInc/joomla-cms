@@ -62,16 +62,12 @@ function getQueryParam($key, $default = null)
 }
 
 // Debugging function
-function debugMsg($msg)
-{
-  if (!defined('KSDEBUG'))
-  {
+function debugMsg($msg){
+  if (!defined('KSDEBUG')){
     return;
   }
-
   $fp = fopen('debug.txt', 'at');
-
-  fwrite($fp, $msg . "\n");
+  fwrite($fp, (is_string($msg) ? $msg : print_r($msg,true)) . "\n");
   fclose($fp);
 }
 

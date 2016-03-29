@@ -63,7 +63,7 @@ class JInstallerStandaloneProviderAkeeba extends JInstallerStandaloneProvider {
 
     // Identify File Location / Size
       $file = $package['dir'];
-      $app->setUserState('com_installer.filesize', @filesize($file));
+      $app->setUserState('com_installer.filesize', $this->__foldersize($file));
 
     // Identify Filetype
       $filetype = is_dir($file) ? 'folder' : 'file';
@@ -93,7 +93,7 @@ class JInstallerStandaloneProviderAkeeba extends JInstallerStandaloneProvider {
       $config_output_config[] ="'kickstart.setup.destdir' => '$siteroot'";
       $config_output_config[] ="'kickstart.setup.restoreperms' => '0'";
       $config_output_config[] ="'kickstart.setup.filetype' => '$filetype'";
-      $config_output_config[] ="'kickstart.setup.dryrun' => '0'";
+      $config_output_config[] ="'kickstart.setup.dryrun' => '1'";
 
     // Push FTP Environment (do a lot of folder validation)
       if( $method == 'ftp' ){
@@ -233,6 +233,22 @@ class JInstallerStandaloneProviderAkeeba extends JInstallerStandaloneProvider {
     // Complete
       return $result;
 
+  }
+
+  protected function __foldersize( $base, $path=null ){
+    $size = 0;
+    $files = scandir( $base.'/'.$path );
+    foreach( $files AS $file ){
+      if( !preg_match('/^\.+$/', $file) ){
+        if( is_dir($base.'/'.$path.$file) ){
+          $size += $this->__foldersize($base, $path.$file.'/');
+        }
+        else if( is_readable($base.'/'.$path.$file) ){
+          $size += filesize($base.'/'.$path.$file);
+        }
+      }
+    }
+    return $size;
   }
 
 }

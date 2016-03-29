@@ -14,6 +14,12 @@ class AKUnarchiverFolder extends AKUnarchiverJPA
 
   var $expectDataDescriptor = false;
 
+  function __sleep(){
+    return array_diff(array_keys(get_object_vars($this)), array(
+      'fileList'
+      ));
+  }
+
   /**
    * [readArchiveHeader description]
    * @return [type] [description]
@@ -44,36 +50,66 @@ class AKUnarchiverFolder extends AKUnarchiverJPA
     $this->setState('running');
     $timer = AKFactory::getTimer();
     $status = true;
+    $file = 0;
+
+    debugMsg( $this );
 
     while( $status && ($timer->getTimeLeft() > 0) ){
+
       switch( $this->runState ){
+
         case AK_STATE_NOFILE:
-          // Send start of file notification
+          // Report
             $message = new stdClass;
             $message->type = 'startfile';
             $message->content = new stdClass;
-            $message->content->compressed   = 0;
+            $message->content->compressed   = 0; // $this->totalSize;
             $message->content->uncompressed = 0;
             $this->notify($message);
+
         case AK_STATE_DATAREAD:
           // Queue
-            $this->nextFile();
-            if( $this->fp ){
+            if( $file++ >= 1000 )
+              return true;
+            if( $this->nextFile() && $this->fp ){
               $this->runState = AK_STATE_DATA;
+              debugMsg( [$this->fileDetails, $this->currentPartNumber, $this->currentPartOffset] );
+              // Report
+                $message = new stdClass;
+                $message->type = 'startfile';
+                $message->content = new stdClass;
+                $message->content->compressed   = $this->fileDetails->size;
+                $message->content->uncompressed = 0;
+                $this->notify($message);
             }
             else {
-              $this->runState = AK_STATE_DONE;
+              $this->runState = AK_STATE_POSTPROC;
             }
           break;
+
         case AK_STATE_DATA:
-          // Process
-            $status = $this->processFileData();
+          $status = $this->processFileData();
           break;
+
+        case AK_STATE_POSTPROC:
+          debugMsg(__CLASS__.'::_run() - Calling post-processing class');
+          $this->postProcEngine->timestamp = $this->fileHeader->timestamp;
+          $status = $this->postProcEngine->process();
+          $this->propagateFromObject( $this->postProcEngine );
+          $this->runState = AK_STATE_DONE;
+          break;
+
         case AK_STATE_DONE:
         default:
-          $this->setState('finished');
-          return true;
+          // Report
+            $message = new stdClass;
+            $message->type = 'endfile';
+            $message->content = new stdClass;
+            $this->notify($message);
+            $this->setState('finished');
+            return true;
           break;
+
       }
     }
 
@@ -83,35 +119,55 @@ class AKUnarchiverFolder extends AKUnarchiverJPA
    * Opens the next part file for reading
    */
   protected function nextFile(){
-    debugMsg('Current part is ' . $this->currentPartNumber . '; opening the next part');
-    ++$this->currentPartNumber;
 
-    $file = $this->__scanFolderRecursively( $this->getFilename(), null, $this->currentPartNumber );
-    if( !is_readable($file) ){
-      $this->setState('postrun');
-      return false;
-    }
+    // Incrementw
+      ++$this->currentPartNumber;
 
-    $root = AKFactory::get('kickstart.setup.destdir');
-    $this->fileDetails = array(
-      'source' => $file,
-      'size'   => filesize( $file ),
-      'target' => $root . DS . substr($file, strlen($this->getFilename()))
-      );
+    // Debug
+      debugMsg('Current part is ' . $this->currentPartNumber . '; opening the next part');
 
-    if(is_resource($this->fp)){
-      @fclose($this->fp);
-    }
+    // Close
+      if(is_resource($this->fp)){
+        @fclose($this->fp);
+        $this->fp = null;
+      }
 
-    debugMsg('Opening file ' . $file);
-    $this->fp = @fopen($file, 'rb');
-    if($this->fp === false){
-      debugMsg('Could not open file - crash imminent');
-    }
-    fseek($this->fp, 0);
-    $this->currentPartOffset = 0;
+    // Reset
+      $this->fileDetails = (object)array();
 
-    return true;
+    // Lookup
+      if( empty($this->fileList) )
+        $file = $this->__scanFolderRecursively( $this->getFilename() );
+      if( isset($this->fileList[ $this->currentPartNumber ]) )
+        $file = $this->fileList[ $this->currentPartNumber ];
+      if( !$file || !is_readable($file) ){
+        $this->setState('postrun');
+        return false;
+      }
+
+    // Debug
+      debugMsg(' - Found ' . $file);
+
+    // Translate
+      $root = AKFactory::get('kickstart.setup.destdir');
+      $this->fileDetails = (object)array(
+        'source' => $file,
+        'size'   => filesize( $file ),
+        'target' => $root . substr($file, strlen($this->getFilename()))
+        );
+
+    // Open
+      debugMsg(' - Opening file ' . $file);
+      $this->fp = @fopen($file, 'rb');
+      if($this->fp === false){
+        debugMsg('Could not open file - crash imminent');
+      }
+      fseek($this->fp, 0);
+      $this->currentPartOffset = 0;
+
+    // Complete
+      return true;
+
   }
 
   /**
@@ -124,8 +180,6 @@ class AKUnarchiverFolder extends AKUnarchiverJPA
       $size   = $this->fileDetails->size;
       $source = $this->fileDetails->source;
       $target = $this->fileDetails->target;
-
-inspect( $size, $source, $target );die(__LINE__.': '.__FILE__);
 
     // Uncompressed files are being processed in small chunks, to avoid timeouts
       if( ($this->dataReadLength == 0) && !AKFactory::get('kickstart.setup.dryrun','0') ){
@@ -162,8 +216,8 @@ inspect( $size, $source, $target );die(__LINE__.': '.__FILE__);
         $reallyReadBytes = akstringlen($data);
         $leftBytes -= $reallyReadBytes;
         $this->dataReadLength += $reallyReadBytes;
+        $this->totalWritten += $reallyReadBytes;
         if($reallyReadBytes < $toReadBytes){
-          // Nope. The archive is corrupt
           debugMsg('Not enough data in file / the file is corrupt.');
           $this->setError( AKText::_('ERR_CORRUPT_FILE') );
           return false;
@@ -173,9 +227,13 @@ inspect( $size, $source, $target );die(__LINE__.': '.__FILE__);
             @fwrite( $outfp, $data );
       }
 
+    // Debug
+      debugMsg(' - Wrote to file ' . $target);
+
     // Close the file pointer
       if( !AKFactory::get('kickstart.setup.dryrun','0') )
-        if(is_resource($outfp)) @fclose($outfp);
+        if(is_resource($outfp))
+          @fclose($outfp);
 
     // Was this a pre-timeout bail out?
       if( $leftBytes > 0 ){
@@ -204,13 +262,18 @@ inspect( $size, $source, $target );die(__LINE__.': '.__FILE__);
       $this->currentPartOffset = 0;
       $this->runState          = AK_STATE_NOFILE;
       $this->totalSize         = 0;
-      $this->fileList          = array();
+      $this->totalWritten      = 0;
+      $this->fileCount         = 0;
+      $this->fileList          = 0;
+
+    // Scan
+      $this->__scanFolderRecursively( $this->getFilename() );
 
     // Send start of file notification
       $message = new stdClass;
       $message->type = 'totalsize';
       $message->content = new stdClass;
-      $message->content->totalsize = 0;
+      $message->content->totalsize = $this->totalSize;
       $message->content->filelist  = array();
       $this->notify($message);
 
@@ -221,7 +284,7 @@ inspect( $size, $source, $target );die(__LINE__.': '.__FILE__);
    * @param  [type] $path [description]
    * @return [type]       [description]
    */
-  protected function __scanFolderRecursively( $base, $path=null, $seekPart=0, $partCount=0 ){
+  protected function __scanFolderRecursively( $base, $path=null, $seekPart=null, $partCount=0 ){
     $files = scandir( $base.DS.$path );
     foreach( $files AS $file ){
       if( !preg_match('/^\.+$/', $file) ){
@@ -231,9 +294,11 @@ inspect( $size, $source, $target );die(__LINE__.': '.__FILE__);
             return $res;
         }
         else if( is_readable($base.DS.$path.$file) ){
+          $this->fileCount++;
           $this->totalSize += filesize($base.DS.$path.$file);
+          $this->fileList[] = $base.DS.$path.$file;
           $partCount++;
-          if( $partCount > $seekPart )
+          if( !is_null($seekPart) && $partCount > $seekPart )
             return $base.DS.$path.$file;
         }
       }
