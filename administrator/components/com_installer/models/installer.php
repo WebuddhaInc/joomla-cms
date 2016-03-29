@@ -24,19 +24,19 @@ class InstallerModelInstaller extends JModelLegacy
   public function initialize( $params ){
 
     // Stage Model
-      $this->set( 'package', $params['package'] );
-      $this->set( 'params', new JRegistry($params['params']) );
+      $this->setState( 'package', $params['package'] );
+      $this->setState( 'params', new JRegistry($params['params']) );
 
     // Identify standalog staging location
       $root_path = JPATH_ROOT;
       $tmp_path  = JFactory::getConfig()->get('tmp_path');
       if( strpos($tmp_path, $root_path) === 0 ){
-        $this->set('installer_path', $tmp_path . '/com_installer/');
-        $this->set('installer_site', substr($tmp_path,strlen($root_path)) . '/com_installer/');
+        $this->setState('installer_path', $tmp_path . '/com_installer/');
+        $this->setState('installer_site', substr($tmp_path,strlen($root_path)) . '/com_installer/');
       }
       else {
-        $this->set('installer_path', JPATH_ROOT . '/media/com_installer/standalone/');
-        $this->set('installer_site', '/media/com_installer/standalone/');
+        $this->setState('installer_path', JPATH_ROOT . '/media/com_installer/standalone/');
+        $this->setState('installer_site', '/media/com_installer/standalone/');
       }
 
     // Reset Installer
@@ -50,7 +50,8 @@ class InstallerModelInstaller extends JModelLegacy
       }
 
     // Prepare Session
-      JFactory::getApplication()->setUserState('com_installer.ajaxurl', $this->get('installer_site') . 'installer.php');
+      $this->storeSessionState();
+      JFactory::getApplication()->setUserState('com_installer.ajaxurl', $this->getState('installer_site') . 'installer.php');
       JFactory::getApplication()->setUserState('com_installer.returnurl', 'index.php?option=com_installer&task=installer.finalise');
 
     // Success
@@ -66,13 +67,25 @@ class InstallerModelInstaller extends JModelLegacy
   public function finalize( $params ){
 
     // Stage Model
-      $this->set( 'success', $params['success'] );
-      $this->set( 'message', $params['message'] );
-      $this->set( 'package', $params['package'] );
+      $this->stageSessionState();
+      $this->setState( 'success', $params['success'] );
+      $this->setState( 'message', $params['message'] );
+
+    // Stage
+      $package = $this->getState('package');
 
     // This event allows a custom a post-flight:
       JEventDispatcher::getInstance()
-        ->trigger('onInstallerAfterInstaller', array($this, $this->get('package'), null, $this->get('success'), $this->get('message')));
+        ->trigger('onInstallerAfterInstaller', array($this, $package, null, $this->getState('success'), $this->getState('message')));
+
+    // Cleanup the package files
+      if( isset($package['packagefile']) ){
+        if( !is_file($package['packagefile']) ){
+          $config = JFactory::getConfig();
+          $package['packagefile'] = $config->get('tmp_path') . '/' . $package['packagefile'];
+        }
+        JInstallerHelper::cleanupInstall($package['packagefile'], $package['extractdir']);
+      }
 
     // Finalize Model
       $this->reset();
@@ -85,21 +98,61 @@ class InstallerModelInstaller extends JModelLegacy
    */
   public function reset(){
 
-    // Reset Session
-      JFactory::getApplication()->setUserState('com_installer', null);
-
-    // Delete Previous Files
-      $installer_path = $this->get('installer_path');
-      if( is_readable($installer_path . 'installer.php') ){
-        @unlink($installer_path . 'installer.php');
-      }
-
     // Allow provider to reset
       $provider = $this->getInstallerProvider();
       $provider->reset();
 
+    // Delete Previous Files
+      $installer_path = $this->getState('installer_path');
+      if( is_readable($installer_path . 'installer.php') ){
+        @unlink($installer_path . 'installer.php');
+      }
+      if( is_dir($installer_path) ){
+        @rmdir($installer_path);
+      }
+
+    // Reset Session
+      JFactory::getApplication()->setUserState('com_installer', null);
+
     // Complete
       return true;
+
+  }
+
+  /**
+   * [storeSessionState description]
+   * @return [type] [description]
+   */
+  public function storeSessionState(){
+
+    // Stage
+      $app = JFactory::getApplication();
+      $state = $this->getState();
+
+    // Push to Session
+      foreach( $state AS $key => $val ){
+        if( strpos($key, '_') !== 0 ){
+          $app->setUserState( 'com_installer.' . $key, $state->{$key} );
+        }
+      }
+
+  }
+
+  /**
+   * [stageSessionState description]
+   * @return [type] [description]
+   */
+  public function stageSessionState(){
+
+    // Stage
+      $installer = JFactory::getApplication()->getUserState('com_installer');
+
+    // Pull from Session
+      if( $installer ){
+        foreach( $installer AS $key => $val ){
+          $this->setState( $key, $installer->{$key} );
+        }
+      }
 
   }
 
@@ -111,10 +164,10 @@ class InstallerModelInstaller extends JModelLegacy
     require_once JPATH_ADMINISTRATOR . '/components/com_installer/provider/standaloneProvider.php';
     require_once JPATH_ADMINISTRATOR . '/components/com_installer/provider/akeeba.php';
     return new JInstallerStandaloneProviderAkeeba( array(
-      'installer_path' => $this->get('installer_path'),
-      'installer_site' => $this->get('installer_site'),
-      'package'        => $this->get('package'),
-      'params'         => $this->get('params')
+      'installer_path' => $this->getState('installer_path'),
+      'installer_site' => $this->getState('installer_site'),
+      'package'        => $this->getState('package'),
+      'params'         => $this->getState('params')
       ));
   }
 
@@ -126,7 +179,7 @@ class InstallerModelInstaller extends JModelLegacy
 
     // Stage
       $app = JFactory::getApplication();
-      $installer_path = $this->get('installer_path');
+      $installer_path = $this->getState('installer_path');
 
     // Copy Installer to Media
       if(
@@ -150,7 +203,7 @@ class InstallerModelInstaller extends JModelLegacy
 
         // Prepare build instructions
         // TODO: This is ugly and needs a class
-          $targetPathRegex = trim(str_replace('/', '.', $this->get('installer_site')), '.');
+          $targetPathRegex = trim(str_replace('/', '.', $this->getState('installer_site')), '.');
           $installerBuildList = array(
             array(
               "",

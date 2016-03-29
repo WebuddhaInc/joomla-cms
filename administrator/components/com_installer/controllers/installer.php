@@ -89,15 +89,10 @@ class InstallerControllerInstaller extends JControllerLegacy
       $success = $app->input->getInt('success') ? 1 : 0;
       $message = $app->input->getVar('message');
 
-    // Get Package Name
-      $package = $app->getUserState('com_installer.package');
-      $package_name = isset($package['name']) ? $package['name'] : JText::_('COM_INSTALLER_TYPE_TYPE_PACKAGE');
-
     // Finalize Model
       $model->finalize( array(
         'success' => $success,
-        'message' => $message,
-        'package' => $package
+        'message' => $message
         ) );
 
     // We're done
