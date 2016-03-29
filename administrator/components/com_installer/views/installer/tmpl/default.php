@@ -39,20 +39,20 @@ jQuery(document).ready(function(){ window.pingExtract(); });
       <div id="progress-bar" class="bar bar-success" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
     </div>
     <div class="extprogrow">
-      <span class="extvalue" id="extpercent"></span>
       <span class="extlabel"><?php echo JText::_('COM_INSTALLER_VIEW_INSTALLER_PERCENT'); ?></span>
+      <span class="extvalue" id="extpercent"></span>
     </div>
     <div class="extprogrow">
-      <span class="extvalue" id="extbytesin"></span>
       <span class="extlabel"><?php echo JText::_('COM_INSTALLER_VIEW_INSTALLER_BYTESREAD'); ?></span>
+      <span class="extvalue" id="extbytesin"></span>
     </div>
     <div class="extprogrow">
-      <span class="extvalue" id="extbytesout"></span>
       <span class="extlabel"><?php echo JText::_('COM_INSTALLER_VIEW_INSTALLER_BYTESEXTRACTED'); ?></span>
+      <span class="extvalue" id="extbytesout"></span>
     </div>
     <div class="extprogrow">
-      <span class="extvalue" id="extfiles"></span>
       <span class="extlabel"><?php echo JText::_('COM_INSTALLER_VIEW_INSTALLER_FILESEXTRACTED'); ?></span>
+      <span class="extvalue" id="extfiles"></span>
     </div>
   </div>
 </div>
