@@ -21,11 +21,23 @@ class InstallerModelInstaller extends JModelLegacy
    * [initialize description]
    * @return [type] [description]
    */
-  public function initialize( $package, $params ){
+  public function initialize( $params ){
 
     // Stage Model
-      $this->set( 'package', $package );
-      $this->set( 'params', new JRegistry($params) );
+      $this->set( 'package', $params['package'] );
+      $this->set( 'params', new JRegistry($params['params']) );
+
+    // Identify standalog staging location
+      $root_path = JPATH_ROOT;
+      $tmp_path  = JFactory::getConfig()->get('tmp_path');
+      if( strpos($tmp_path, $root_path) === 0 ){
+        $this->set('installer_path', $tmp_path . '/com_installer/');
+        $this->set('installer_site', substr($tmp_path,strlen($root_path)) . '/com_installer/');
+      }
+      else {
+        $this->set('installer_path', JPATH_ROOT . '/media/com_installer/standalone/');
+        $this->set('installer_site', '/media/com_installer/standalone/');
+      }
 
     // Reset Installer
       if( !$this->reset() ){
@@ -38,7 +50,7 @@ class InstallerModelInstaller extends JModelLegacy
       }
 
     // Prepare Session
-      JFactory::getApplication()->setUserState('com_installer.ajaxurl', '/media/com_installer/standalone/installer.php');
+      JFactory::getApplication()->setUserState('com_installer.ajaxurl', $this->get('installer_site') . 'installer.php');
       JFactory::getApplication()->setUserState('com_installer.returnurl', 'index.php?option=com_installer&task=installer.finalise');
 
     // Success
@@ -46,9 +58,24 @@ class InstallerModelInstaller extends JModelLegacy
 
   }
 
-  public function finalise(){
+  /**
+   * [finalize description]
+   * @param  [type] $params [description]
+   * @return [type]         [description]
+   */
+  public function finalize( $params ){
 
-    die(__LINE__.': '.__FILE__);
+    // Stage Model
+      $this->set( 'success', $params['success'] );
+      $this->set( 'message', $params['message'] );
+      $this->set( 'package', $params['package'] );
+
+    // This event allows a custom a post-flight:
+      JEventDispatcher::getInstance()
+        ->trigger('onInstallerAfterInstaller', array($this, $this->get('package'), null, $this->get('success'), $this->get('message')));
+
+    // Finalize Model
+      $this->reset();
 
   }
 
@@ -59,10 +86,17 @@ class InstallerModelInstaller extends JModelLegacy
   public function reset(){
 
     // Reset Session
-      JFactory::getApplication()->setUserState('com_installer.password', null);
-      JFactory::getApplication()->setUserState('com_installer.filesize', null);
-      JFactory::getApplication()->setUserState('com_installer.ajaxurl', null);
-      JFactory::getApplication()->setUserState('com_installer.returnurl', null);
+      JFactory::getApplication()->setUserState('com_installer', null);
+
+    // Delete Previous Files
+      $installer_path = $this->get('installer_path');
+      if( is_readable($installer_path . 'installer.php') ){
+        @unlink($installer_path . 'installer.php');
+      }
+
+    // Allow provider to reset
+      $provider = $this->getInstallerProvider();
+      $provider->reset();
 
     // Complete
       return true;
@@ -70,35 +104,18 @@ class InstallerModelInstaller extends JModelLegacy
   }
 
   /**
-   * [install description]
-   * @return [type] [description]
-   */
-  public function status(){
-
-    die(__LINE__.': '.__FILE__);
-
-    return true;
-  }
-
-  /**
-   * [install description]
-   * @return [type] [description]
-   */
-  public function install(){
-
-    die(__LINE__.': '.__FILE__);
-
-    return true;
-  }
-
-  /**
    * [getInstallerProvider description]
    * @return [type] [description]
    */
   public function getInstallerProvider(){
-    include(JPATH_ADMINISTRATOR . '/components/com_installer/standalone/provider/standaloneProvider.php');
-    include(JPATH_ADMINISTRATOR . '/components/com_installer/standalone/provider/akeeba.php');
-    return new JInstallerStandaloneProviderAkeeba( $this->get('package'), $this->get('params') );
+    require_once JPATH_ADMINISTRATOR . '/components/com_installer/provider/standaloneProvider.php';
+    require_once JPATH_ADMINISTRATOR . '/components/com_installer/provider/akeeba.php';
+    return new JInstallerStandaloneProviderAkeeba( array(
+      'installer_path' => $this->get('installer_path'),
+      'installer_site' => $this->get('installer_site'),
+      'package'        => $this->get('package'),
+      'params'         => $this->get('params')
+      ));
   }
 
   /**
@@ -109,31 +126,31 @@ class InstallerModelInstaller extends JModelLegacy
 
     // Stage
       $app = JFactory::getApplication();
+      $installer_path = $this->get('installer_path');
 
     // Copy Installer to Media
       if(
-        is_readable(JPATH_ADMINISTRATOR . '/components/com_installer/standalone/installer.php')
-        &&
         (
-        is_dir(JPATH_ROOT . '/media/com_installer/standalone/')
+        is_dir($installer_path)
         ||
-        @mkdir(JPATH_ROOT . '/media/com_installer/standalone/', 0755, true)
+        @mkdir($installer_path, 0755, true)
         )
         &&
-        is_writeable(JPATH_ROOT . '/media/com_installer/standalone/')
+        is_writeable($installer_path)
         ){
 
         // Remove Existing
-          if( is_readable(JPATH_ROOT . '/media/com_installer/standalone/installer.php') ){
-            @unlink(JPATH_ROOT . '/media/com_installer/standalone/installer.php');
+          if( is_readable($installer_path . 'installer.php') ){
+            @unlink($installer_path . 'installer.php');
           }
-          if( is_readable(JPATH_ROOT . '/media/com_installer/standalone/installer.php') ){
+          if( is_readable($installer_path . 'installer.php') ){
             $app->enqueueMessage(JText::_('COM_INSTALLER_STANDALONE_NOT_WRITABLE'), 'error');
             return false;
           }
 
         // Prepare build instructions
         // TODO: This is ugly and needs a class
+          $targetPathRegex = trim(str_replace('/', '.', $this->get('installer_site')), '.');
           $installerBuildList = array(
             array(
               "",
@@ -142,7 +159,7 @@ class InstallerModelInstaller extends JModelLegacy
               "  " . gmdate('Y-m-d H:i:s'),
               "*/",
               "",
-              "if( !preg_match('/media.com_installer.standalone/', __DIR__) ){ exit; }",
+              "if( !preg_match('/{$targetPathRegex}/', __DIR__) ){ exit; }",
               ""
               )
             );
@@ -157,7 +174,7 @@ class InstallerModelInstaller extends JModelLegacy
 
         // Build installer file
         // TODO: There is probably a good standard for replacing this
-          $fh = fopen( JPATH_ROOT . '/media/com_installer/standalone/installer.php', 'w+' );
+          $fh = fopen( $installer_path . 'installer.php', 'w+' );
           if( $fh ){
             $bytesWritten = 0;
             foreach( $installerBuildList AS $item ){
@@ -206,7 +223,7 @@ class InstallerModelInstaller extends JModelLegacy
             $app->enqueueMessage(JText::_('COM_INSTALLER_STANDALONE_NOT_WRITABLE'), 'error');
             return false;
           }
-          if( !is_readable(JPATH_ROOT . '/media/com_installer/standalone/installer.php') ){
+          if( !is_readable($installer_path . 'installer.php') ){
             $app->enqueueMessage(JText::_('COM_INSTALLER_STANDALONE_NOT_WRITABLE'), 'error');
             return false;
           }

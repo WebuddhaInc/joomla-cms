@@ -21,6 +21,7 @@ var stat_total    = 0;
 var stat_files    = 0;
 var stat_inbytes  = 0;
 var stat_outbytes = 0;
+var last_error    = null;
 
 /**
  * The following should is defined by the view
@@ -215,11 +216,13 @@ startExtract = function()
 
 stepExtract = function(data)
 {
+	last_status = data.status ? 1 : 0;
+	last_error = data.message ? data.message : null;
 	if(data.status == false)
 	{
 		// handle failure
 		error_callback(data.message);
-
+		finalizeUpdate();
 		return;
 	}
 
@@ -253,8 +256,6 @@ stepExtract = function(data)
 		stat_outbytes += data.bytesOut;
 		stat_files += data.files;
 		stat_percent = (stat_inbytes * 100) / com_installer_totalsize;
-
-		console.log( data.bytesIn, stat_inbytes, data.bytesOut, stat_outbytes, data.files, stat_files );
 
 		if (stat_percent < 100)
 		{
@@ -291,9 +292,11 @@ finalizeUpdate = function ()
 	// Do AJAX post
 	var post = { task : 'finalizeRestore', factory: window.factory };
 	doEncryptedAjax(post, function(data){
-		alert('Done');
-		return;
-		window.location = com_installer_return_url;
+		window.location = com_installer_return_url
+										+ (/\?/.test(com_installer_return_url) ? '&' : '?')
+										+ 'success='+last_status
+										+ '&message='+encodeURI(last_error)
+										;
 	});
 };
 

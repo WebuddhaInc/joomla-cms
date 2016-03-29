@@ -194,7 +194,6 @@ class InstallerModelInstall extends JModelLegacy
 				$result = true;
 				$msgType = 'message';
 			}
-					inspect( $result, $msgType, $package );die(__LINE__.': '.__FILE__);
 
 		// This event allows a custom a post-flight:
 			$dispatcher->trigger('onInstallerAfterInstaller', array($this, &$package, $installer, &$result, &$msg));
